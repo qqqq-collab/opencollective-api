@@ -8,7 +8,6 @@ import express from 'express';
 import session from 'express-session';
 import helmet from 'helmet';
 import { get, has } from 'lodash';
-import morgan from 'morgan';
 import passport from 'passport';
 import { Strategy as GitHubStrategy } from 'passport-github';
 import { Strategy as MeetupStrategy } from 'passport-meetup-oauth2';
@@ -18,7 +17,7 @@ import redis from 'redis';
 import { loadersMiddleware } from '../graphql/loaders';
 
 import forest from './forest';
-import { middleware as hyperwatchMiddleware } from './hyperwatch';
+import hyperwatch from './hyperwatch';
 import logger from './logger';
 import { sanitizeForLogs } from './utils';
 
@@ -30,11 +29,6 @@ export default async function (app) {
   // Loaders are attached to the request to batch DB queries per request
   // It also creates in-memory caching (based on request auth);
   app.use(loadersMiddleware);
-
-  // Log requests if enabled (default false)
-  if (get(config, 'log.accessLogs')) {
-    app.use(morgan('combined'));
-  }
 
   // Body parser.
   app.use(
@@ -52,8 +46,8 @@ export default async function (app) {
   );
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Register Hyperwatch middleware
-  app.use(hyperwatchMiddleware);
+  // Hyperwatch
+  await hyperwatch(app);
 
   // Slow requests if enabled (default false)
   if (get(config, 'log.slowRequest')) {
