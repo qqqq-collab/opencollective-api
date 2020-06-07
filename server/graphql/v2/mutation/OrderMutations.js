@@ -1,4 +1,4 @@
-import { GraphQLNonNull } from 'graphql';
+import { GraphQLInt, GraphQLNonNull } from 'graphql';
 
 import activities from '../../../constants/activities';
 import status from '../../../constants/order_status';
@@ -7,6 +7,7 @@ import { NotFound, Unauthorized } from '../../errors';
 import { getDecodedId } from '../identifiers';
 import { OrderReferenceInput } from '../input/OrderReferenceInput';
 import { PaymentMethodReferenceInput } from '../input/PaymentMethodReferenceInput';
+import { TierUpdateInput } from '../input/TierUpdateInput';
 import { Order } from '../object/Order';
 
 const modelArray = [
@@ -132,6 +133,14 @@ const orderMutations = {
         type: PaymentMethodReferenceInput,
         description: 'Reference to a Payment Method to update the order with',
       },
+      tier: {
+        type: TierUpdateInput,
+        description: 'Reference to a Tier to update the order with',
+      },
+      amount: {
+        type: GraphQLInt,
+        description: 'An Amount to update the order to',
+      },
     },
     async resolve(_, args, req) {
       const decodedId = getDecodedId(args.order.id);
@@ -140,7 +149,7 @@ const orderMutations = {
         throw new Unauthorized('You need to be logged in to update a order');
       }
 
-      const { paymentMethod } = args;
+      const { paymentMethod, amount, tier } = args;
 
       const query = {
         where: {
@@ -175,6 +184,39 @@ const orderMutations = {
         }
 
         order = await order.update({ PaymentMethodId: newPaymentMethod.id });
+      }
+
+      // amount
+      if (amount !== order.totalAmount) {
+        if (amount < 100) {
+          throw new Error('Invalid amount.');
+        }
+
+        // If using a tier, amount can never be less than the minimum amount, or else $1.00
+        if (amount < tier.minimumAmount) {
+          throw new Error('Amount is less than minimum value allowed for this Tier.');
+        }
+
+        order = await order.update({ totalAmount: amount });
+      }
+
+      // tier
+      // check if the tier is different from the previous tier
+      if (tier.legacyId !== order.TierId) {
+        // check if the tier is a named tier
+        if (tier.legacyId !== null) {
+          const tierInfo = await models.Tier.findByPk(tier.legacyId);
+
+          if (!tierInfo) {
+            throw new Error(`No tier found with tier id: ${tier.legacyId} for collective ${order.CollectiveId}`);
+          } else if (tierInfo.CollectiveId !== order.CollectiveId) {
+            throw new Error(
+              `This tier (#${tierInfo.id}) doesn't belong to the given Collective #${order.CollectiveId}`,
+            );
+          }
+        }
+
+        order = await order.update({ TierId: tier.legacyId });
       }
 
       return order;
