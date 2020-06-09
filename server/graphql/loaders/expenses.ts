@@ -1,9 +1,12 @@
 import DataLoader from 'dataloader';
+import moment from 'moment';
 
 import ACTIVITY from '../../constants/activities';
+import { isUserTaxFormRequiredBeforePayment } from '../../lib/tax-forms';
 import models, { Op } from '../../models';
 import { ExpenseAttachedFile } from '../../models/ExpenseAttachedFile';
 import { ExpenseItem } from '../../models/ExpenseItem';
+import { LEGAL_DOCUMENT_TYPE } from '../../models/LegalDocument';
 
 import { sortResultsArray } from './helpers';
 
@@ -72,3 +75,46 @@ export const attachedFiles = (): DataLoader<number, ExpenseAttachedFile[]> => {
     return sortResultsArray(expenseIds, attachedFiles, file => file.ExpenseId);
   });
 };
+
+/**
+ * Expense loader to check if userTaxForm is required before expense payment
+ */
+export const userTaxFormRequiredBeforePayment = (req): DataLoader<number, boolean> => {
+  return new DataLoader(async (expenseIds: number[]) => {
+    const expenses = await req.loaders.Expense.byId.loadMany(expenseIds);
+     return Promise.all(
+       expenses.map(async expense => {
+        const incurredYear = moment(expense.incurredAt).year();
+  
+        return isUserTaxFormRequiredBeforePayment({
+          year: incurredYear,
+          invoiceTotalThreshold: 600e2,
+          expenseCollectiveId: expense.CollectiveId,
+          UserId: expense.UserId,
+        });
+       })
+     )
+  });
+}
+
+/**
+ * Loader for expense's requiredLegalDocuments.
+ */
+export const requiredLegalDocuments = (req): DataLoader<number, object[]> => {
+  return new DataLoader(async (expenseIds: number[]) => {
+    const expenses = await req.loaders.Expense.byId.loadMany(expenseIds);
+     return Promise.all(
+       expenses.map(async expense => {
+        const incurredYear = moment(expense.incurredAt).year();
+        const isW9FormRequired = await isUserTaxFormRequiredBeforePayment({
+          year: incurredYear,
+          invoiceTotalThreshold: 600e2,
+          expenseCollectiveId: expense.CollectiveId,
+          UserId: expense.UserId,
+        });
+
+        return isW9FormRequired ? [LEGAL_DOCUMENT_TYPE.US_TAX_FORM] : [];
+       })
+     )
+  });
+}
